@@ -10,7 +10,7 @@ we propose a novel approach for expanding language model prompts by gen-
 erating hyponyms that could be used as paraphrases of the given predicate.
 * We build on the system developed by [1].
 ## prerequisites ##
-```Python ``` (v3.9.12), ```Torch ``` (v1.11.0), ```Torch ``` (v4.18.0)
+```Python ``` (v3.9.12), ```Torch ``` (v1.11.0), ```Transformers ``` (v4.18.0)
 ```jdk``` (v1.8.0), ```maven``` (v3.8.5)
 ## Running Instructions ##
 To run this project, first compile using:
