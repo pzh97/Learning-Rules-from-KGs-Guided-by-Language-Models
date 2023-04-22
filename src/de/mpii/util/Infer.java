@@ -215,7 +215,6 @@ public class Infer {
     // Process first <top> rules of the <file> (top by lines, not by scr)
     public static void main(String[] args) throws Exception {
 //        args = "../data/fb15k-new/ ../msarin/fb15k.amie.pca.2 50 tmp -s10".split("\\s++");
-
         int mins = 0;
         for (int i = 0; i < args.length; ++i) {
             if (args[i].startsWith("-s")) {
@@ -247,8 +246,43 @@ public class Infer {
         int unknownNum = 0;
         int total = 0;
         double averageQuality = 0;
+        double averageRecall = 0;
+        HashMap<String, Integer> predicateNumMap = new HashMap<String, Integer>();
+        ArrayList<String> headPredicates = new ArrayList<String>();
         ArrayList<Pair<Double, Integer>> spearman = new ArrayList<>();
+        ArrayList<Rule> ruleSets = new ArrayList<>();
+        String l;
+        BufferedReader inp = new BufferedReader(new InputStreamReader(new FileInputStream(args[1])));
+        while ((l = inp.readLine()) != null) {
+            if(l.isEmpty() || ruleCount >= top) {
+                break;
+            }
+            String rulep = l.split("\t")[0];
+            Rule rp = parseRule(knowledgeGraph, rulep);
+            if (predicate != null && !knowledgeGraph.relationsString[rp.atoms.get(0).pid].equals(predicate)) {
+                continue;
+            }
+            headPredicates.add(knowledgeGraph.relationsString[rp.atoms.get(0).pid]);
+            ruleSets.add(rp);
+        }
+        HashSet<String> hset = new HashSet<String>(headPredicates);
+        inp.close();
+        double hitAll = 0.0;
+        int ruleNum = 0;
+        BufferedReader tn = new BufferedReader(new FileReader(args[0] + "/" + "test.data.txt"));
+        int testNum = 0;
+        String t;
+        while ((t = tn.readLine()) != null) {
+            if (t.isEmpty()){
+                break;
+            }
+            testNum++;
+        }
+        System.out.println(testNum);
+        tn.close();
+
         while ((line = in.readLine()) != null) {
+            ruleNum++;
             if (line.isEmpty() || ruleCount >= top) {
                 break;
             }
@@ -261,11 +295,66 @@ public class Infer {
             LOGGER.info("Inferring rule: " + rule);
             HashSet<SOInstance> instances = matchRule(r, false);
             System.out.println("body_support: " + instances.size());
+            headPredicates.add(knowledgeGraph.relationsString[r.atoms.get(0).pid]);
             int pid = r.atoms.get(0).pid;
             int localNumTrue = 0;
             int localPredict = 0;
             int support = 0;
+            String testline;
+            String tl;
+            String pInRules;
+            int predicateRuleCount = 0;
+            BufferedReader testGraph = new BufferedReader(new FileReader(args[0] + "/" + "test.data.txt"));
 
+            while ((testline = testGraph.readLine()) != null) {
+                if (testline.isEmpty()){
+                    break;
+                }
+
+                pInRules = testline.split("\t")[1];
+                if (knowledgeGraph.relationsString[r.atoms.get(0).pid].equals(pInRules)) {
+                    ++predicateRuleCount;
+                    predicateNumMap.put(pInRules, predicateRuleCount);
+                }
+
+            }
+            //System.out.println(predicateNumMap);
+
+            LOGGER.info("predicateRuleCount: " +predicateRuleCount);
+            testGraph.close();
+            Set<SOInstance> arr = new HashSet<SOInstance>();
+            int i = 0;
+            for (SOInstance so : instances) {
+                if (i > 99) break;
+                arr.add(so);
+                i++;
+            }
+            BufferedReader tg = new BufferedReader(new FileReader(args[0] + "/" + "test.data.txt"));
+            String pRule;
+            String oRule;
+            String sRule;
+            while ((tl = tg.readLine()) != null) {
+
+                if (tl.isEmpty()) {
+                    break;
+                }
+                pRule = tl.split("\t")[1];
+                sRule = tl.split("\t")[0];
+                oRule = tl.split("\t")[2];
+                for (SOInstance so : arr) {
+                    double hit = 0.0;
+
+                    if (knowledgeGraph.entitiesString[so.subject].equals(sRule) && knowledgeGraph
+                            .relationsString[pid].equals(pRule) && knowledgeGraph.entitiesString[so.object].equals(oRule)) {
+                        hit++;
+
+                        //System.out.println(hit/(predicateNumMap.get(pRule)));
+                        hitAll = hitAll + hit/(predicateNumMap.get(pRule));
+                    }
+                    //hitAll = hitAll + hit;
+                }
+            }
+            tg.close();
             for (SOInstance so : instances) {
                 if (!knowledgeGraph.trueFacts.containFact(so.subject, pid, so.object)) {
                     ++localPredict;
@@ -293,9 +382,20 @@ public class Infer {
                 continue;
             }
             averageQuality += ((double) localNumTrue) / localPredict;
+            averageRecall += ((double) localNumTrue) / predicateRuleCount;
             LOGGER.info(String.format("quality = %.3f", ((double) localNumTrue) / localPredict));
+            PrintWriter precision_rule = new PrintWriter(new BufferedWriter(new FileWriter("precision.txt", true)));
+	        precision_rule.println(rule + " " + String.format("%.3f", ((double) localNumTrue) / localPredict));
+            precision_rule.close();
+            LOGGER.info(String.format("recall = %.3f", ((double) localNumTrue) / predicateRuleCount));
+            PrintWriter recall_rule = new PrintWriter(new BufferedWriter(new FileWriter("recall.txt", true)));
+            recall_rule.println(rule + " " + String.format("%.3f", ((double) localNumTrue) / predicateRuleCount));
+            recall_rule.close();
             spearman.add(new Pair<>(((double) localNumTrue) / localPredict, 1 + top - ruleCount));
         }
+        System.out.println(hitAll);
+        //LOGGER.info(String.format("hitatk = %.3f", hitAll / testNum));
+        LOGGER.info(String.format("hitatk = %.3f", hitAll / 100));
         Collections.sort(spearman, new Comparator<Pair<Double, Integer>>() {
             @Override
             public int compare(Pair<Double, Integer> o1, Pair<Double, Integer> o2) {
@@ -311,9 +411,18 @@ public class Infer {
         out.close();
         LOGGER.info(String.format("#predictions = %d, known_rate = %.3f", total, 1 - ((double) unknownNum / total)));
         LOGGER.info(String.format("#average_quality = %.3f", averageQuality / top));
+	    LOGGER.info(String.format("#average_recall = %.3f", averageRecall / top));
         LOGGER.info(String.format("Spearman = %.3f", spearCo));
         if (ruleCount != top) {
             LOGGER.warning("Not enough number of requested rules");
         }
+        BufferedReader test = new BufferedReader(new FileReader(args[0] + "/" + "test.txt"));
+        ArrayList<SOInstance> Pinstances = new ArrayList<SOInstance>();
+        for (int i = 0; i < ruleSets.size(); i++) {
+            HashSet<SOInstance> predictedInstances = matchRule(ruleSets.get(i), false);
+            ArrayList<SOInstance> predictions = new ArrayList<>(predictedInstances);
+            Pinstances.addAll(predictions);
+        }
+        test.close();
     }
 }
