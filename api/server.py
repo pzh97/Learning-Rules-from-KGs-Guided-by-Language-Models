@@ -31,13 +31,13 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         if url.path == '/predict':
-            model = queue.get()
             params = parse_qs(url.query)
-            c = params['query'][0]
-            response = model.predict(c, top_k=100)
+            head = params['head'][0]
+            relation = params['relation'][0]
+            tail = params['tail'][0]
+            response = model.predict(head, relation, tail, top_k=100)
             self._set_response()
             self.wfile.write("{}".format(json.dumps(response)).encode('utf-8'))
-            queue.put(model)
         else:
             super().do_GET()
 
@@ -55,4 +55,4 @@ def run(port=6993):
 
 
 if __name__ == '__main__':
-    run(6993)
+    run(6995)

@@ -3,19 +3,33 @@ package de.mpii.embedding;
 import de.mpii.util.Crawler;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.json.JSONTokener;
+import org.json.JSONException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.io.FileReader;
 
 import org.apache.hc.core5.net.URIBuilder;
 
 public class BertClient extends EmbeddingClient {
     public static final int top_k = 100;
-
+	public Pattern q_pattern;
+	public JSONObject qids_label;
 
     public BertClient(String workspace){
-	super(workspace);
+		super(workspace);
+		System.out.println(workspace);
+		this.q_pattern = Pattern.compile("Q[0-9]+");
+		try{
+			JSONTokener tokener = new JSONTokener(new FileReader("./data/wiki44k/qids_label.json"));
+			this.qids_label = new JSONObject(tokener);
+		} catch (java.io.FileNotFoundException e) {
+			System.out.println(e);
+		}
     }
      
     @Override
@@ -23,40 +37,41 @@ public class BertClient extends EmbeddingClient {
 		double score = 0.0;
 		try {
 			String s_init = String.valueOf(entitiesString.get(subject));
-			String p_init = String.valueOf(relationsString.get(predicate));
+			Matcher s_matcher = this.q_pattern.matcher(s_init);
+			s_matcher.find();
+			String s_qid = s_matcher.group(0);
+			String s = "";
+			try{
+				s = String.valueOf(this.qids_label.get(s_qid));
+			} catch (JSONException e) {
+				s = s_init.replaceAll("[-+.^:,'()<>_-]", " ").replaceAll("Q+[0-9]+", " ").replaceAll(" +", " ").strip();
+			}
+
 			String o_init = String.valueOf(entitiesString.get(object));
-			String s1 = s_init.replaceAll("[-+.^:,'()<>_-]", " ");
-			String s = s1.replaceAll("Q+[0-9]+", " ");
-			String o_upper = o_init.replaceAll("[-+.^:,'()<>_-]", " ").replaceAll("Q+[0-9]+", " ");
-			//System.out.println(o_upper); need to remove id of object as well.
-			String o_conca = o_upper.toLowerCase();
-			String[] o = o_conca.split(" ");
-			String p_removed = p_init.replaceAll("[-+.^:,'()<>_-]", " ");
-			String p_removed_1 = p_removed.replaceAll("P+[0-9]+", " ");
-			String p = splitString(p_removed_1);
-			URIBuilder b = new URIBuilder("http://localhost:6993/predict");
-			b.addParameter("query", s + p + "[MASK].");
+			Matcher o_matcher = this.q_pattern.matcher(o_init);
+			o_matcher.find();
+			String o_qid = o_matcher.group(0);
+			String o = "";
+			try{
+				o = String.valueOf(this.qids_label.get(o_qid));
+			} catch (JSONException e) {
+				o = o_init.replaceAll("[-+.^:,'()<>_-]", " ").replaceAll("Q+[0-9]+", " ").replaceAll(" +", " ").strip();
+			}
+
+			String p_init = String.valueOf(relationsString.get(predicate));
+			String p = p_init.replaceAll("[-+.^:,'()<>_-]", " ").replaceAll("P+[0-9]+", " ").replaceAll(" +", " ").strip();
+
+
+			URIBuilder b = new URIBuilder("http://localhost:6995/predict");
+			
+			b.addParameter("head", s);
+			b.addParameter("relation", p);
+			b.addParameter("tail", o);
 			String Uri = b.toString();
 			System.out.println(Uri);
 			Crawler queryCrawler = new Crawler();
-			String crawlerContent = queryCrawler.getContentFromUrl(Uri);
-			JSONArray jArray = new JSONArray(crawlerContent);
-			ArrayList<Double> scoreArray = new ArrayList<Double>();
-			for (int i = 0; i < top_k; i++) {
-				JSONObject jIndex = jArray.getJSONObject(i);
-				String jPrediction = jIndex.getString("prediction");
-				for (int j = 0; j < o.length; j++) {
-					if (o[j].equals(jPrediction)) {
-						score = 1/(i+1);
-						scoreArray.add(score);
-					}
-				}
-			}
-			if (!(scoreArray.isEmpty())) {
-				return Collections.min(scoreArray);
-			}
-			else
-				return 0.0;
+			float mrr = Float.parseFloat(queryCrawler.getContentFromUrl(Uri));
+			return mrr;
 		} catch (URISyntaxException e) {
 			System.out.println(e);
 		}
@@ -64,8 +79,8 @@ public class BertClient extends EmbeddingClient {
 	}
 
     public static void main (String[] args) {
-	BertClient bertclient = new BertClient("./data/wiki44k/");
-	System.out.println(bertclient.getScore(0,0,0));
+		BertClient bertclient = new BertClient("./data/wiki44k/");
+		System.out.println(bertclient.getScore(0,0,0));
     }
 
     public static String splitString (String splitC){
